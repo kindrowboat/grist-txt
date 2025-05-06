@@ -1,0 +1,86 @@
+<html>
+<head>
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <style>
+    html, body, #main {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      font-family: sans-serif;
+    }
+    #main {
+      display: flex;
+      flex-direction: column;
+    }
+    #TextArea {
+      flex: 1;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    #Status {
+      display: block;
+      padding: 4px;
+      text-align: right;
+      font-size: 0.9em;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+  <div id="main">
+    <span id="Status">loading</span>
+    <textarea id="TextArea"></textarea>
+  </div>
+  <script>
+    let currentRecord = null;
+    let debounceTimer = null;
+    let tableId = null;
+    let colId = null;
+
+    function setStatus(msg) {
+      Status.textContent = msg;
+    }
+
+    function updateText() {
+      if (currentRecord && currentRecord.id && colId && tableId) {
+        setStatus('saving');
+        grist.docApi.applyUserActions([ ['UpdateRecord', tableId, currentRecord.id, {
+          [colId]: TextArea.value
+        }]]).then(function(e) {
+          setStatus('saved');
+        }).catch(function(e) {
+          setStatus(`error: ${err}`);
+        });        
+      }
+    }
+
+    grist.ready({
+      requiredAccess: 'full',
+      columns: ['text']
+    });
+
+    grist.on('message', (e) => {
+      if (e.tableId) { tableId = e.tableId; }
+    });
+
+    grist.onRecord((record, mappings) => {
+      colId = mappings.text;
+      setStatus('ready');
+      currentRecord = record;
+      TextArea.value = currentRecord[colId];
+    });
+
+    TextArea.addEventListener('input', () => {
+      setStatus('editing');
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(updateText, 5000);
+    });
+
+    TextArea.addEventListener('blur', () => {
+      clearTimeout(debounceTimer);
+      updateText();
+    });
+  </script>
+</body>
+</html>
