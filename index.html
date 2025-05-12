@@ -29,8 +29,8 @@
 </head>
 <body>
   <div id="main">
-    <span id="Status">loading</span>
-    <textarea id="TextArea"></textarea>
+    <span id="Status">uninitialized</span>
+    <textarea id="TextArea" disabled=true></textarea>
   </div>
   <script>
     let currentRecord = null;
@@ -38,8 +38,13 @@
     let tableId = null;
     let colId = null;
 
-    function setStatus(msg) {
-      Status.textContent = msg;
+    function setStatus(status) {
+      if(status == 'ready' || status == 'editing' || status == 'saved') {
+        TextArea.disabled = false
+      } else {
+        TextArea.disabled = true;
+      }
+      Status.textContent = status;
     }
 
     function updateText() {
@@ -71,6 +76,11 @@
       TextArea.value = currentRecord[colId];
     });
 
+    grist.onNewRecord( () => {
+      setStatus('no record')
+      TextArea.value = '';
+    });
+    
     TextArea.addEventListener('input', () => {
       setStatus('editing');
       clearTimeout(debounceTimer);
