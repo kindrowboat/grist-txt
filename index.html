@@ -140,7 +140,7 @@
           case TxtStatus.EDITING:
             this.#setStatus(TxtStatus.SAVING_AUTO);
             this.#disableTextArea();
-            await this.#saveAndUpdateStatus();
+            this.#saveAndUpdateStatus();
             break;
           default:
             this.#invalidTransition(fromStatus, TxtStatus.SAVING_AUTO);
@@ -153,10 +153,14 @@
           case TxtStatus.EDITING:
             this.#setStatus(TxtStatus.SAVING_BLUR);
             this.#disableTextArea();
-            await this.#saveAndUpdateStatus();
+            this.#saveAndUpdateStatus();
             break;
           default:
-            this.transToReady();
+            // no-op
+            // this gets fired on every blur event, including when the text area is disabled
+            // e.g. on SAVING_AUTO or ERROR
+            // we do not want to autosave in these cases
+            break;
         }
       }
 
@@ -181,7 +185,7 @@
         if (err) {
           this.transToError(err);
         } else {
-          this.#setStatus(TxtStatus.READY);
+          this.transToReady();
         }
       }
 
@@ -220,7 +224,7 @@
       async #saveText() {
         this.#clearDebounceTimer();
         try {
-          this.#grist.docApi.applyUserActions([['UpdateRecord', this.#tableId, this.#currentRecord.id, {
+          await this.#grist.docApi.applyUserActions([['UpdateRecord', this.#tableId, this.#currentRecord.id, {
             [this.#colId]: this.#textArea.value
           }]]);
         } catch (err) {
