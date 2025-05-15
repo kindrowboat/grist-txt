@@ -33,32 +33,206 @@
     <textarea id="TextArea" disabled=true></textarea>
   </div>
   <script>
-    let currentRecord = null;
-    let debounceTimer = null;
-    let tableId = null;
-    let colId = null;
+    "use strict";
+    const TxtStatus = Object.freeze({
+      UNINITIALIZED: 'uninitialized',
+      READY: 'ready',
+      NO_RECORD: 'no record',
+      EDITING: 'editing',
+      SAVING_AUTO: 'saving (auto)',
+      SAVING_BLUR: 'saving (blur)',
+      ERROR: 'error',
+    });  
 
-    function setStatus(status) {
-      if(status == 'ready' || status == 'editing' || status == 'saved') {
-        TextArea.disabled = false
-      } else {
-        TextArea.disabled = true;
+    class GristTxtController {
+
+      #grist;
+      #tableId;
+      #colId;
+      #currentRecord;
+      #textArea;
+      #status = TxtStatus.UNINITIALIZED
+      #statusSpan;
+      #debounceTimer;
+
+      constructor(grist, textArea, statusSpan) {
+        this.#grist = grist;
+        this.#textArea = textArea;
+        this.#statusSpan = statusSpan;
       }
-      Status.textContent = status;
+
+      set tableId(tableId) {
+        this.#tableId = tableId;
+      }
+
+      onRecord(record, mappings) {
+        this.#currentRecord = record;
+        this.#colId = mappings.text;
+        this.transToReady();
+      }
+
+      onNewRecord() {
+        this.#currentRecord = null;
+        this.#colId = null;
+        this.transToNoRecord();
+      }
+
+      transToNoRecord() {
+        const fromStatus = this.#status;
+        switch (fromStatus) {
+          case TxtStatus.SAVING_AUTO:
+          case TxtStatus.SAVING_BLUR:
+            // block transition
+            break;
+          case TxtStatus.READY:
+          case TxtStatus.UNINITIALIZED:
+          case TxtStatus.NO_RECORD:
+          case TxtStatus.ERROR:
+            this.#disableTextArea();
+            this.#clearTextAreaValue();
+            this.#setStatus(TxtStatus.NO_RECORD);
+            break;
+          case TxtStatus.EDITING:
+          default:
+            this.#invalidTransition(fromStatus, TxtStatus.NO_RECORD);
+        }
+      }
+
+      transToReady() {
+        const fromStatus = this.#status
+        switch (fromStatus) {
+          case TxtStatus.UNINITIALIZED:
+          case TxtStatus.READY:
+          case TxtStatus.NO_RECORD:
+          case TxtStatus.ERROR:
+          case TxtStatus.SAVING_BLUR:
+            this.#enableTextArea();
+            this.#setTextAreaValueFromRecord();
+            this.#setStatus(TxtStatus.READY);
+            break;
+          case TxtStatus.SAVING_AUTO:
+            this.#enableTextArea();
+            this.#focusTextArea();
+            this.#setStatus(TxtStatus.READY);
+            break;
+          case TxtStatus.EDITING:
+          default:
+            this.#invalidTransition(this.#status, TxtStatus.READY);
+        }
+      }
+      
+      transToEditing() {
+        const fromStatus = this.#status;
+        switch (fromStatus) {
+            case TxtStatus.READY:
+            case TxtStatus.EDITING:
+                this.#startOrExtendAutoSaveTimer();
+                this.#setStatus(TxtStatus.EDITING);
+                break;
+            default:
+                this.#invalidTransition(fromStatus, TxtStatus.EDITING);
+        }
+      }
+
+      async transToSavingAuto() {
+        const fromStatus = this.#status;
+        switch (fromStatus) {
+          case TxtStatus.EDITING:
+            this.#setStatus(TxtStatus.SAVING_AUTO);
+            this.#disableTextArea();
+            await this.#saveAndUpdateStatus();
+            break;
+          default:
+            this.#invalidTransition(fromStatus, TxtStatus.SAVING_AUTO);
+        }
+      }
+
+      async transToSavingBlur() {
+        const fromStatus = this.#status;
+        switch (fromStatus) {
+          case TxtStatus.EDITING:
+            this.#setStatus(TxtStatus.SAVING_BLUR);
+            this.#disableTextArea();
+            await this.#saveAndUpdateStatus();
+            break;
+          default:
+            this.transToReady();
+        }
+      }
+
+      transToError(err) {
+        this.#setErrorStatus(err);
+        console.error(err);
+        this.#disableTextArea();
+      }
+
+      #setStatus(status) {
+        this.#status = status;
+        this.#statusSpan.textContent = status;
+      }
+
+      #setErrorStatus(err) {
+        this.#status = TxtStatus.ERROR;
+        this.#statusSpan.textContent = `error: ${err}`;
+      }
+
+      async #saveAndUpdateStatus() {
+        const err = await this.#saveText();
+        if (err) {
+          this.transToError(err);
+        } else {
+          this.#setStatus(TxtStatus.READY);
+        }
+      }
+
+      #clearDebounceTimer() {
+        if (this.#debounceTimer) {
+          clearTimeout(this.#debounceTimer);
+          this.#debounceTimer = null;
+        }
+      }
+
+      #startOrExtendAutoSaveTimer() {
+        this.#clearDebounceTimer();
+        this.#debounceTimer = setTimeout(this.transToSavingAuto.bind(this), 5000);
+      }
+
+      #clearTextAreaValue() {
+        this.#textArea.value = '';
+      }
+      #setTextAreaValueFromRecord() {
+        this.#textArea.value = this.#currentRecord[this.#colId];
+      }
+      #disableTextArea() {
+        this.#textArea.disabled = true;
+      }
+      #enableTextArea() {
+        this.#textArea.disabled = false;
+      }
+      #focusTextArea() {
+        this.#textArea.focus();
+      }
+
+      #invalidTransition(fromStatus, toStatus) {
+        this.#setErrorStatus(`Invalid transition from ${fromStatus} to ${toStatus}`);
+      }
+
+      async #saveText() {
+        this.#clearDebounceTimer();
+        try {
+          this.#grist.docApi.applyUserActions([['UpdateRecord', this.#tableId, this.#currentRecord.id, {
+            [this.#colId]: this.#textArea.value
+          }]]);
+        } catch (err) {
+          return err;
+        }
+        return null;
+      }
     }
 
-    function updateText() {
-      if (currentRecord && currentRecord.id && colId && tableId) {
-        setStatus('saving');
-        grist.docApi.applyUserActions([ ['UpdateRecord', tableId, currentRecord.id, {
-          [colId]: TextArea.value
-        }]]).then(function(e) {
-          setStatus('saved');
-        }).catch(function(e) {
-          setStatus(`error: ${err}`);
-        });        
-      }
-    }
+    const textArea = document.getElementById('TextArea');
+    const statusSpan = document.getElementById('Status');
+    const controller = new GristTxtController(window.grist, textArea, statusSpan);
 
     grist.ready({
       requiredAccess: 'full',
@@ -66,31 +240,16 @@
     });
 
     grist.on('message', (e) => {
-      if (e.tableId) { tableId = e.tableId; }
+      if (e.tableId) { controller.tableId = e.tableId; }
     });
 
-    grist.onRecord((record, mappings) => {
-      colId = mappings.text;
-      setStatus('ready');
-      currentRecord = record;
-      TextArea.value = currentRecord[colId];
-    });
+    grist.onRecord(controller.onRecord.bind(controller));
 
-    grist.onNewRecord( () => {
-      setStatus('no record')
-      TextArea.value = '';
-    });
+    grist.onNewRecord(controller.onNewRecord.bind(controller));
     
-    TextArea.addEventListener('input', () => {
-      setStatus('editing');
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(updateText, 5000);
-    });
+    TextArea.addEventListener('input', controller.transToEditing.bind(controller));
 
-    TextArea.addEventListener('blur', () => {
-      clearTimeout(debounceTimer);
-      updateText();
-    });
+    TextArea.addEventListener('blur', controller.transToSavingBlur.bind(controller));
   </script>
 </body>
 </html>

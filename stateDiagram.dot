@@ -1,0 +1,25 @@
+digraph G {
+  rankdir=LR;
+  
+  UNINITIALIZED -> READY [label="enable editory"]
+  UNINITIALIZED -> NO_RECORD
+  UNINITIALIZED -> ERROR
+  
+  READY -> EDITING [label="start timer"]
+  READY -> NO_RECORD [label="disable editor"]
+
+  NO_RECORD -> READY [label="enable editor"]
+  
+  EDITING -> EDITING [label="debounce timer"]
+  EDITING -> SAVING_AUTO [label="disable editor"]
+  EDITING -> SAVING_BLUR [label="disable editor"]
+  
+  SAVING_AUTO -> READY [label="enable & focus editor"]
+  SAVING_AUTO -> ERROR
+  
+  SAVING_BLUR -> READY [label="enable editor"]
+  SAVING_BLUR -> ERROR
+
+  ERROR -> READY [label="enable editor"]
+  ERROR -> NO_RECORD [label="(keep disabled)"]
+}
